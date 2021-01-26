@@ -23,10 +23,6 @@ def close_db():
     env.close()
 
 
-def getEnvTxn():
-    return env.txn_begin()
-
-
 class DB(type):
     """Metaclass for Resource objects"""
 
@@ -36,13 +32,8 @@ class DB(type):
             cls.filename = name
             cls.db = bsddb3.db.DB(env)
             cls.db.open(cls.filename, None, cls.DBTYPE,
-                        bsddb3.db.DB_AUTO_COMMIT |
-                        bsddb3.db.DB_THREAD |
                         bsddb3.db.DB_CREATE)
             CLOSE_ON_EXIT.append(cls.db)
-
-    def getTxn(cls):
-        return cls.db.txn_begin()
 
 
 class Resource(metaclass=DB):
@@ -127,27 +118,20 @@ class Resource(metaclass=DB):
     def set_db_key(self):
         self.db_key = to_string(" ".join([str(x) for x in self.values]))
 
-    def alter(self, fun, txn=None):
+    def alter(self, fun):
         """Apply fun to current value and then save it."""
-        commit = False
-        if txn is None:
-            txn = env.txn_begin()
-            commit = True
-        before = self.get(txn)
+        before = self.get()
         after = fun(before)
-        self.put(after, txn)
-        if commit:
-            txn.commit()
-
+        self.put(after)
         return after
 
-    def get(self, txn=None):
+    def get(self):
         """Get method for resource, and its subclasses"""
         if self.db_key not in self.db:
-            return self.make(txn)
-        return from_string(self.db.get(self.db_key, txn=txn))
+            return self.make()
+        return from_string(self.db.get(self.db_key))
 
-    def make(self, txn=None):
+    def make(self):
         """Make function for when object doesn't exist
 
         Override functionality by adding a make_details function to your subclass"""
@@ -155,16 +139,16 @@ class Resource(metaclass=DB):
             made = self.make_details()
         except AttributeError:
             return None
-        self.put(made, txn)
+        self.put(made)
         return made
 
-    def put(self, value, txn=None):
+    def put(self, value):
         """Put method for resource, and its subclasses"""
         if value is None:
             if self.db_key in self.db:
-                self.db.delete(self.db_key, txn=txn)
+                self.db.delete(self.db_key)
         else:
-            self.db.put(self.db_key, to_string(value), txn=txn)
+            self.db.put(self.db_key, to_string(value))
 
     def __repr__(self):
         return '%s("%s")' % (self.__class__.__name__, from_string(self.db_key))
@@ -175,14 +159,14 @@ class Container(Resource):
 
     Subclasses will require an add_item and remove_item function"""
 
-    def add(self, item, txn=None):
+    def add(self, item):
         self.item = item
-        after = self.alter(self.add_item, txn=txn)
+        after = self.alter(self.add_item)
         return self.item, after
 
-    def remove(self, item, txn=None):
+    def remove(self, item):
         self.item = item
-        after = self.alter(self.remove_item, txn=txn)
+        after = self.alter(self.remove_item)
         return self.removed, after
 
 
@@ -288,10 +272,7 @@ def createEnvWithDir(envPath):
             os.makedirs(envPath)
         env.open(
             envPath,
+            bsddb3.db.DB_INIT_CDB |
             bsddb3.db.DB_INIT_MPOOL |
-            bsddb3.db.DB_THREAD |
-            bsddb3.db.DB_INIT_LOCK |
-            bsddb3.db.DB_INIT_TXN |
-            bsddb3.db.DB_INIT_LOG |
             bsddb3.db.DB_CREATE)
         envOpened = True
