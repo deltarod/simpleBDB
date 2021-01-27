@@ -2,13 +2,13 @@ import pickle
 import os
 import pandas as pd
 # third party module not by me:
-import bsddb3
+import berkeleydb
 
-# For more info on bsddb3 see here: http://pybsddb.sourceforge.net/bsddb3.html
+# For more info on berkeleydb see here: http://pybsddb.sourceforge.net/berkeleydb.html
 
 # Setup Berkeley DB Env
 # More info n the flags can be found here: https://docs.oracle.com/cd/E17276_01/html/api_reference/C/envopen.html
-env = bsddb3.db.DBEnv()
+env = berkeleydb.db.DBEnv()
 
 CLOSE_ON_EXIT = []
 
@@ -30,15 +30,15 @@ class DB(type):
         """Called when Resource and each subclass is defined"""
         if "keys" in dir(cls):
             cls.filename = name
-            cls.db = bsddb3.db.DB(env)
+            cls.db = berkeleydb.db.DB(env)
             cls.db.open(cls.filename, None, cls.DBTYPE,
-                        bsddb3.db.DB_CREATE)
+                        berkeleydb.db.DB_CREATE)
             CLOSE_ON_EXIT.append(cls.db)
 
 
 class Resource(metaclass=DB):
-    """Base class for bsddb3 files"""
-    DBTYPE = bsddb3.db.DB_BTREE
+    """Base class for berkeleydb files"""
+    DBTYPE = berkeleydb.db.DB_BTREE
 
     @classmethod
     def all(cls):
@@ -46,7 +46,7 @@ class Resource(metaclass=DB):
 
     @classmethod
     def db_keys(cls):
-        return [from_string(k) for k in cls.db.keys()]
+        return [cls.bytesToKey(k) for k in cls.db.keys()]
 
     @classmethod
     def db_key_tuples(cls):
@@ -101,12 +101,28 @@ class Resource(metaclass=DB):
     def has_key(cls, k):
         return k in cls.db
 
+    @classmethod
+    def keyToBytes(cls, a):
+        return pickle.dumps(a, 2)
+
+    @classmethod
+    def bytesToKey(cls, a):
+        return pickle.loads(a)
+
+    @classmethod
+    def valueToBytes(cls, a):
+        return pickle.dumps(a, 2)
+
+    @classmethod
+    def bytesToValue(cls, a):
+        return pickle.loads(a)
+
     def __init__(self, *args):
         if len(args) != len(self.keys):
             raise ValueError(
                 "should have exactly %d args: %s" % (
                     len(self.keys),
-                    ", ".join([from_string(x) for x in self.keys]),
+                    ", ".join([self.bytesToKey(x) for x in self.keys]),
                 ))
         self.values = [str(a) for a in args]
         for a in self.values:
@@ -116,7 +132,7 @@ class Resource(metaclass=DB):
         self.set_db_key()
 
     def set_db_key(self):
-        self.db_key = to_string(" ".join([str(x) for x in self.values]))
+        self.db_key = self.keyToBytes(" ".join([str(x) for x in self.values]))
 
     def alter(self, fun):
         """Apply fun to current value and then save it."""
@@ -129,7 +145,7 @@ class Resource(metaclass=DB):
         """Get method for resource, and its subclasses"""
         if self.db_key not in self.db:
             return self.make()
-        return from_string(self.db.get(self.db_key))
+        return self.bytesToValue(self.db.get(self.db_key))
 
     def make(self):
         """Make function for when object doesn't exist
@@ -148,10 +164,10 @@ class Resource(metaclass=DB):
             if self.db_key in self.db:
                 self.db.delete(self.db_key)
         else:
-            self.db.put(self.db_key, to_string(value))
+            self.db.put(self.db_key, self.valueToBytes(value))
 
     def __repr__(self):
-        return '%s("%s")' % (self.__class__.__name__, from_string(self.db_key))
+        return '%s("%s")' % (self.__class__.__name__, self.bytesToKey(self.db_key))
 
 
 class Container(Resource):
@@ -172,6 +188,16 @@ class Container(Resource):
 
 class PandasDf(Container):
     """Adds support for using Pandas Data Frames, as well as different ways to add items"""
+
+    @classmethod
+    def valueToBytes(cls, a):
+        asJson = a.to_json()
+        return pickle.dumps(asJson, 2)
+    @classmethod
+    def bytesToValue(cls, a):
+        fromJson = pd.read_json(pickle.loads(a))
+        return fromJson
+
     def add_item(self, df):
         if isinstance(self.item, pd.Series):
             if len(df.index) >= 1:
@@ -250,14 +276,6 @@ class PandasDf(Container):
         return pd.DataFrame()
 
 
-def to_string(a):
-    return pickle.dumps(a, 2)
-
-
-def from_string(a):
-    return pickle.loads(a)
-
-
 envOpened = False
 
 
@@ -272,8 +290,7 @@ def createEnvWithDir(envPath):
             os.makedirs(envPath)
         env.open(
             envPath,
-            bsddb3.db.DB_INIT_CDB |
-            bsddb3.db.DB_INIT_MPOOL |
-            bsddb3.db.DB_CREATE |
-            bsddb3.db.DB_CDB_ALLDB)
+            berkeleydb.db.DB_INIT_CDB |
+            berkeleydb.db.DB_INIT_MPOOL |
+            berkeleydb.db.DB_CREATE)
         envOpened = True
