@@ -274,5 +274,6 @@ def createEnvWithDir(envPath):
             envPath,
             bsddb3.db.DB_INIT_CDB |
             bsddb3.db.DB_INIT_MPOOL |
-            bsddb3.db.DB_CREATE)
+            bsddb3.db.DB_CREATE |
+            bsddb3.db.DB_CDB_ALLDB)
         envOpened = True
